@@ -1,6 +1,6 @@
 #include "stud_krystych_cpp_pkg/student_publisher.hpp"
 
-const int PUBLISH_INTERVAL_MS = 500;
+constexpr int PUBLISH_INTERVAL_MS = 500;
 
 StudentPublisher::StudentPublisher(): Node("stud_krystych_publisher"), counter_(1)
 {
