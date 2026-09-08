@@ -18,11 +18,11 @@ rcl_allocator_t allocator;
 rclc_executor_t executor;
 rcl_publisher_t publisher_celsius;
 rcl_publisher_t publisher_fahrenheit;
+rcl_timer_t timer;
 
 std_msgs__msg__Float32 temperature_celsius_msg;
 std_msgs__msg__Float32 temperature_fahrenheit_msg;
 
-unsigned long last_publish_time = 0;
 constexpr unsigned long PUBLISH_INTERVAL = 1000;
 constexpr unsigned long MICROROS_STARTUP_DELAY = 2000;
 
@@ -39,6 +39,34 @@ float readTemperature()
 float celsiusToFahrenheit(float celsius)
 {
   return celsius * 9.0f / 5.0f + 32.0f;
+}
+
+void publishTemperature()
+{
+  float temperature_celsius = readTemperature();
+
+  if (isnan(temperature_celsius))
+  {
+    return;
+  }
+
+  float temperature_fahrenheit = celsiusToFahrenheit(temperature_celsius);
+
+  temperature_celsius_msg.data = temperature_celsius;
+  temperature_fahrenheit_msg.data = temperature_fahrenheit;
+
+  rcl_publish(&publisher_celsius, &temperature_celsius_msg, NULL);
+  rcl_publish(&publisher_fahrenheit, &temperature_fahrenheit_msg, NULL);
+}
+
+void timer_callback(rcl_timer_t *timer, int64_t last_call_time)
+{
+  (void)last_call_time;
+
+  if (timer != NULL)
+  {
+    publishTemperature();
+  }
 }
 
 bool setupMicroROS()
@@ -62,26 +90,38 @@ bool setupMicroROS()
   }
 
   if (rclc_publisher_init_default(
-    &publisher_celsius, 
-    &node,
-    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32), 
-    "/stud_krystych/temperature/celsius") != RCL_RET_OK
-  )
+          &publisher_celsius,
+          &node,
+          ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
+          "/stud_krystych/temperature/celsius") != RCL_RET_OK)
   {
     return false;
   }
 
   if (rclc_publisher_init_default(
-    &publisher_fahrenheit, 
-    &node,
-    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32), 
-    "/stud_krystych/temperature/fahrenheit") != RCL_RET_OK
-  )
+          &publisher_fahrenheit,
+          &node,
+          ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
+          "/stud_krystych/temperature/fahrenheit") != RCL_RET_OK)
+  {
+    return false;
+  }
+
+  if (rclc_timer_init_default(
+          &timer,
+          &support,
+          RCL_MS_TO_NS(PUBLISH_INTERVAL),
+          timer_callback) != RCL_RET_OK)
   {
     return false;
   }
 
   if (rclc_executor_init(&executor, &support.context, 1, &allocator) != RCL_RET_OK)
+  {
+    return false;
+  }
+
+  if (rclc_executor_add_timer(&executor, &timer) != RCL_RET_OK)
   {
     return false;
   }
@@ -94,24 +134,6 @@ bool checkMicroROSConnection()
   return rmw_uros_ping_agent(100, 1) == RMW_RET_OK;
 }
 
-void publishTemperature()
-{
-  float temperature_celsius = readTemperature();
-
-  if (isnan(temperature_celsius))
-  {
-    return;
-  }
-
-  float temperature_fahrenheit = celsiusToFahrenheit(temperature_celsius);
-
-  temperature_celsius_msg.data = temperature_celsius;
-  temperature_fahrenheit_msg.data = temperature_fahrenheit;
-
-  rcl_publish(&publisher_celsius, &temperature_celsius_msg, NULL);
-  rcl_publish(&publisher_fahrenheit, &temperature_fahrenheit_msg, NULL);
-}
-
 void setup()
 {
   setupSensor();
@@ -120,19 +142,10 @@ void setup()
 
 void loop()
 {
-  unsigned long current_time = millis();
-
   if (!checkMicroROSConnection())
   {
     setupMicroROS();
     return;
-  }
-
-  if (current_time - last_publish_time >= PUBLISH_INTERVAL)
-  {
-    last_publish_time = current_time;
-
-    publishTemperature();
   }
 
   rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
